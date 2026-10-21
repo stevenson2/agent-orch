@@ -76,10 +76,10 @@
 
 | 套件 | 本仓库适配器 | 无头入口 | 核实 |
 | --- | --- | --- | --- |
-| DeepSeek harness | `dsh` | `dsh --profile headless [--json] [--session-id <id>] "<task>"` | 官方文档核实（`packages/bundle/headless/README.md`、`docs` CLI 页）。成功退出码 0，否则 1。`--json` 是 NDJSON。没有 `--cwd`，本适配器把子进程的工作目录设成任务 worktree。另有 `dsh --profile acp`，本适配器不使用。 |
+| DeepSeek harness | `dsh` | `dsh --profile headless "<任务>"`。`--json`、`--session-id` 只有 `dsh --profile headless --help` 里出现时才加 | 用户实测 dsh 0.1.5-rc.2：帮助里只有 `[task...]` 和 `-h`，没有 `--json` / `--session-id`。推理写在 stderr，最终回答写在 stdout，然后退出。带上 `--json` 会报 `unknown option '--json'`。没有 `--cwd`，本适配器把子进程工作目录设成任务 worktree。规划/审查从最终回答里取围栏代码块或第一个配平的 JSON 对象。官方文档里的 `--json` NDJSON 只在那一版帮助里真有这个旗标时使用。另有 `dsh --profile acp`，本适配器不使用。 |
 | acpx | `acpx` | `acpx <agent> exec --format json --cwd <dir> --approve-reads\|--approve-all "<task>"` | [acpx README](https://github.com/openclaw/acpx) 与 `docs/agents.md` 核实。`exec` 是一次性、不保留会话。规划/审查用 `--approve-reads`，执行用 `--approve-all`。 |
 | Claude Code | `command`（示例）或 `acpx claude` | `claude -p` / `claude --print --output-format json`；ACP 为 `npx -y @agentclientprotocol/claude-agent-acp` | `-p`/`--print` 是 Claude Code 与 ccbridge、headless-cli 使用的无头形式。本机未实跑，旗标以你本地的 `claude --help` 为准。 |
-| Codex | `command`（示例 `codex exec`）或 `acpx codex` | `codex exec`；ACP 为 `npx -y @agentclientprotocol/codex-acp` | `codex exec` 见于 Codex CLI 与 headless-cli、Amon Hen。本机未实跑。Windows 上 npm 全局命令是 `codex.cmd`，编排器会把 npm cmd-shim 展开成 `node.exe` 加脚本，避免多行提示词经过 `cmd.exe`。 |
+| Codex | `command`（示例 `codex exec`）或 `acpx codex` | `codex exec`；ACP 为 `npx -y @agentclientprotocol/codex-acp` | 用户实测：`codex exec` 在 stdin 还开着时会打印 `Reading additional input from stdin...` 并一直等。编排器把 stdin 立刻关掉。连不上 `chatgpt.com` 这类网络错误会单独写进失败说明。Windows 上 npm 全局命令是 `codex.cmd`，编排器会把 npm cmd-shim 展开成 `node.exe` 加脚本，避免多行提示词经过 `cmd.exe`。 |
 | Gemini CLI | `acpx`，agent `gemini` | 原生打印：`gemini -p`。ACP：`gemini --acp` | `--acp` 由 acpx 内置注册表核实。`-p` 是 Gemini CLI 常见打印模式，本机未实跑。 |
 | OpenCode | `acpx` 或 `command` | ACP 注册表命令是 `npx -y opencode-ai acp`。另有文档中的 `opencode run` | acpx `docs/agents.md` 核实的是 `npx -y opencode-ai acp`，不是单独的 `opencode acp`。`opencode run` 见于 OpenCode 文档，本机未实跑。 |
 | Qwen | `acpx`，agent `qwen` | `qwen --acp` | acpx 注册表核实。 |

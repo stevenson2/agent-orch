@@ -26,6 +26,14 @@ for (let i = 0; i < argv.length; i += 1) {
 }
 
 const kind = flags.get("--kind") ?? "generic";
+if (flags.has("--help") || flags.has("-h")) {
+  if (kind === "dsh") {
+    process.stdout.write("Usage: dsh --profile headless [task...]\n\nOptions:\n  -h, --help  Show help\n");
+  } else {
+    process.stdout.write("Usage: fake [options]\n\nOptions:\n  --json\n  --session-id <id>\n  -h, --help\n");
+  }
+  process.exit(0);
+}
 const prompt = flags.get("-p") ?? flags.get("--prompt") ?? positionals.at(-1) ?? "";
 const cwdFlag = flags.get("--cwd");
 if (cwdFlag) process.chdir(cwdFlag);
@@ -118,7 +126,10 @@ if (role === "planner") {
 
 saveState(state);
 
-if (kind === "dsh") {
+if (kind === "dsh" && !flags.has("--json")) {
+  process.stderr.write("reasoning: looking at the repo\n");
+  process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+} else if (kind === "dsh") {
   process.stdout.write(`${JSON.stringify({ type: "session", sessionId: "s1" })}\n`);
   process.stdout.write(`${JSON.stringify({ type: "text", text })}\n`);
   process.stdout.write(`${JSON.stringify({ type: "final", text, reason: "completed", usage })}\n`);

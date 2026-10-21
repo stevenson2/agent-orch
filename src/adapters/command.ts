@@ -57,6 +57,8 @@ export class CommandAdapter implements Adapter {
       cwd: request.cwd,
       env: this.options.env,
       timeoutMs: request.timeoutMs ?? this.options.timeoutMs,
+      // `codex exec` waits forever if stdin stays open ("Reading additional input from stdin...").
+      stdin: "ignore",
     });
     return toRunResult(spawned);
   }

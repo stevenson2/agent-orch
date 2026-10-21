@@ -1,4 +1,7 @@
-import type { Spawner } from "../spawn.js";
+import type { AgentMode } from "../types.js";
+import { emptyUsage } from "../types.js";
+import { detectRateLimit, type SpawnResult, type Spawner } from "../spawn.js";
+import { extractJsonObject } from "../parse.js";
 import type { Adapter, RunRequest, RunResult } from "./types.js";
 import { toRunResult } from "./output.js";
 
@@ -12,15 +15,37 @@ export interface DshAdapterOptions {
   timeoutMs?: number;
 }
 
+export interface DshHelpFlags {
+  json: boolean;
+  sessionId: boolean;
+}
+
 /**
- * Native DeepSeek harness one-shot.
- * `dsh --profile headless --json <task>` with the child cwd set to the worktree.
- * Upstream has no --cwd flag; the process working directory is the workspace.
+ * Flags actually printed by `dsh --profile headless --help`.
+ * dsh 0.1.5-rc.2 only documents `[task...]` and `-h`.
+ */
+export function parseDshHelp(text: string): DshHelpFlags {
+  const flags = new Set<string>();
+  for (const match of text.matchAll(/(?:^|[\s,])(--[a-z0-9][a-z0-9-]*)\b/gi)) {
+    flags.add((match[1] ?? "").toLowerCase());
+  }
+  return {
+    json: flags.has("--json"),
+    sessionId: flags.has("--session-id"),
+  };
+}
+
+/**
+ * Native DeepSeek harness one-shot. The process cwd is the worktree.
+ * Extra flags (`--json`, and a future `--session-id`) are added only when
+ * `--help` lists them. Otherwise stdout is the final assistant message and
+ * stderr is reasoning.
  */
 export class DshAdapter implements Adapter {
   readonly id: string;
   readonly vendor: string;
   readonly harness: string;
+  private flags: DshHelpFlags | undefined;
 
   constructor(private readonly options: DshAdapterOptions) {
     this.vendor = options.vendor;
@@ -29,11 +54,12 @@ export class DshAdapter implements Adapter {
   }
 
   async run(request: RunRequest): Promise<RunResult> {
+    const flags = await this.helpFlags(request);
     const args = [
       ...(this.options.commandArgs ?? []),
       "--profile",
       "headless",
-      "--json",
+      ...(flags.json ? ["--json"] : []),
       request.task,
     ];
     const spawned = await this.options.spawner({
@@ -42,7 +68,47 @@ export class DshAdapter implements Adapter {
       cwd: request.cwd,
       env: this.options.env,
       timeoutMs: request.timeoutMs ?? this.options.timeoutMs,
+      stdin: "ignore",
     });
-    return toRunResult(spawned);
+    if (flags.json) return toRunResult(spawned);
+    return plainTextResult(spawned, request.mode);
   }
+
+  private async helpFlags(request: RunRequest): Promise<DshHelpFlags> {
+    if (this.flags) return this.flags;
+    const timeoutMs = request.timeoutMs ?? this.options.timeoutMs;
+    const help = await this.options.spawner({
+      command: this.options.command,
+      args: [...(this.options.commandArgs ?? []), "--profile", "headless", "--help"],
+      cwd: request.cwd,
+      env: this.options.env,
+      timeoutMs: Math.min(timeoutMs ?? 20_000, 20_000),
+      stdin: "ignore",
+    });
+    this.flags = help.timedOut ? { json: false, sessionId: false } : parseDshHelp(`${help.stdout}\n${help.stderr}`);
+    return this.flags;
+  }
+}
+
+function plainTextResult(spawned: SpawnResult, mode: AgentMode): RunResult {
+  const message = spawned.stdout.replace(/\r\n/g, "\n").trim();
+  let result = message;
+  if (mode === "plan" || mode === "review") {
+    try {
+      result = JSON.stringify(extractJsonObject(message));
+    } catch {
+      result = message;
+    }
+  }
+  return {
+    result,
+    diff: "",
+    usage: emptyUsage(),
+    exitCode: spawned.exitCode,
+    stdout: spawned.stdout,
+    stderr: spawned.stderr,
+    rateLimited: detectRateLimit(spawned.exitCode, spawned.stdout, spawned.stderr),
+    timedOut: spawned.timedOut,
+    raw: message,
+  };
 }

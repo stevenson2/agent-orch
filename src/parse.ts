@@ -7,13 +7,7 @@ export interface ReviewVerdict {
   feedback: string;
 }
 
-export function extractJsonObject(text: string): unknown {
-  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const source = fence ? fence[1] : text;
-  const start = source.indexOf("{");
-  if (start < 0) {
-    throw new Error("response did not contain a JSON object");
-  }
+function balancedObjectEnd(source: string, start: number): number {
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -29,12 +23,37 @@ export function extractJsonObject(text: string): unknown {
     else if (ch === "{") depth += 1;
     else if (ch === "}") {
       depth -= 1;
-      if (depth === 0) {
-        return JSON.parse(source.slice(start, i + 1)) as unknown;
-      }
+      if (depth === 0) return i;
     }
   }
-  throw new Error("unterminated JSON object");
+  return -1;
+}
+
+function firstJsonObject(source: string): unknown | undefined {
+  let searchFrom = 0;
+  while (searchFrom < source.length) {
+    const start = source.indexOf("{", searchFrom);
+    if (start < 0) return undefined;
+    const end = balancedObjectEnd(source, start);
+    if (end < 0) return undefined;
+    try {
+      return JSON.parse(source.slice(start, end + 1)) as unknown;
+    } catch {
+      searchFrom = start + 1;
+    }
+  }
+  return undefined;
+}
+
+/** Fenced ```json block, otherwise the first balanced JSON object in the text. */
+export function extractJsonObject(text: string): unknown {
+  for (const fence of text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) {
+    const parsed = firstJsonObject(fence[1] ?? "");
+    if (parsed !== undefined) return parsed;
+  }
+  const parsed = firstJsonObject(text);
+  if (parsed !== undefined) return parsed;
+  throw new Error("response did not contain a JSON object");
 }
 
 function asNumber(value: unknown): number {

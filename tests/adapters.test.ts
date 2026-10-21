@@ -6,7 +6,8 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { AcpxAdapter } from "../src/adapters/acpx.js";
 import { CommandAdapter } from "../src/adapters/command.js";
-import { DshAdapter } from "../src/adapters/dsh.js";
+import { DshAdapter, parseDshHelp } from "../src/adapters/dsh.js";
+import { describeRunFailure } from "../src/adapters/output.js";
 import { decryptCredentialValue, selectCodingPlanKey } from "../src/adapters/zcode-desktop-credentials.js";
 import { resolveDesktopLaunch } from "../src/adapters/zcode-desktop-launch.js";
 import { runDesktopProtocol } from "../src/adapters/zcode-desktop-protocol.js";
@@ -20,7 +21,7 @@ import {
   unwrapCmdShim,
   type SpawnRequest,
 } from "../src/spawn.js";
-import { fakeAgent, fakeDesktop } from "./helpers.js";
+import { fakeAgent, fakeDesktop, repoRoot } from "./helpers.js";
 
 function capture() {
   const calls: SpawnRequest[] = [];
@@ -131,20 +132,112 @@ describe("headless adapters", () => {
     expect(blocked.exitCode).toBe(1);
   });
 
-  it("invokes dsh --profile headless --json in the worktree cwd", async () => {
+  it("drives dsh 0.1.5-rc.2 as plain text unless --help lists extra flags", async () => {
+    const help = "Usage: dsh --profile headless [task...]\n\nOptions:\n  -h, --help  Show help\n";
+    expect(parseDshHelp(help)).toEqual({ json: false, sessionId: false });
+    expect(parseDshHelp("Options:\n  --json\n  --session-id <id>\n")).toEqual({ json: true, sessionId: true });
+
     const seen: SpawnRequest[] = [];
     const adapter = new DshAdapter({
       vendor: "deepseek",
       command: "dsh",
       spawner: async (request) => {
         seen.push(request);
+        if (request.args.includes("--help")) {
+          return { exitCode: 0, stdout: help, stderr: "", timedOut: false };
+        }
+        return {
+          exitCode: 0,
+          stdout: "created notes.txt\n",
+          stderr: "reasoning: looking at the repo\n",
+          timedOut: false,
+        };
+      },
+    });
+    const executed = await adapter.run({ task: "run the tests", cwd: "/tree", mode: "execute" });
+    expect(seen[0]?.args).toEqual(["--profile", "headless", "--help"]);
+    expect(seen[1]?.args).toEqual(["--profile", "headless", "run the tests"]);
+    expect(seen[1]?.stdin).toBe("ignore");
+    expect(seen[1]?.cwd).toBe("/tree");
+    expect(executed.result).toBe("created notes.txt");
+    expect(executed.result).not.toContain("reasoning");
+
+    const planned = await adapter.run({
+      task: "plan",
+      cwd: "/tree",
+      mode: "plan",
+    });
+    expect(seen.filter((call) => call.args.includes("--help"))).toHaveLength(1);
+    expect(planned.result).toBe("created notes.txt");
+
+    const reviewer = new DshAdapter({
+      vendor: "deepseek",
+      command: "dsh",
+      spawner: async (request) => {
+        if (request.args.includes("--help")) {
+          return { exitCode: 0, stdout: help, stderr: "", timedOut: false };
+        }
+        const fenced = [
+          "I checked the diff.",
+          "```json",
+          '{"verdict":"pass","reasons":["ok"],"feedback":""}',
+          "```",
+          "trailing note {not json}",
+        ].join("\n");
+        return { exitCode: 0, stdout: fenced, stderr: "reasoning stays on stderr\n", timedOut: false };
+      },
+    });
+    const reviewed = await reviewer.run({ task: "review", cwd: "/tree", mode: "review" });
+    expect(JSON.parse(reviewed.result)).toEqual({ verdict: "pass", reasons: ["ok"], feedback: "" });
+
+    const planner = new DshAdapter({
+      vendor: "deepseek",
+      command: "dsh",
+      spawner: async (request) => {
+        if (request.args.includes("--help")) {
+          return { exitCode: 0, stdout: help, stderr: "", timedOut: false };
+        }
+        return {
+          exitCode: 0,
+          stdout: 'Here is the plan.\n{"tasks":[{"id":"a","title":"A","instructions":"do it"}]}\n',
+          stderr: "",
+          timedOut: false,
+        };
+      },
+    });
+    const plan = await planner.run({ task: "plan", cwd: "/tree", mode: "plan" });
+    expect(JSON.parse(plan.result)).toEqual({
+      tasks: [{ id: "a", title: "A", instructions: "do it" }],
+    });
+  });
+
+  it("passes --json only when dsh --help advertises it", async () => {
+    const seen: SpawnRequest[] = [];
+    const adapter = new DshAdapter({
+      vendor: "deepseek",
+      command: "dsh",
+      spawner: async (request) => {
+        seen.push(request);
+        if (request.args.includes("--help")) {
+          return {
+            exitCode: 0,
+            stdout: "Usage: dsh --profile headless [options] [task...]\n  --json\n  --session-id <id>\n",
+            stderr: "",
+            timedOut: false,
+          };
+        }
         return {
           exitCode: 0,
           stdout: [
             JSON.stringify({ type: "session", sessionId: "s" }),
             JSON.stringify({ type: "thinking", text: "hidden" }),
             JSON.stringify({ type: "text", text: "hello from dsh" }),
-            JSON.stringify({ type: "final", text: "hello from dsh", reason: "completed", usage: { input_tokens: 8, output_tokens: 2 } }),
+            JSON.stringify({
+              type: "final",
+              text: "hello from dsh",
+              reason: "completed",
+              usage: { input_tokens: 8, output_tokens: 2 },
+            }),
           ].join("\n"),
           stderr: "",
           timedOut: false,
@@ -152,8 +245,8 @@ describe("headless adapters", () => {
       },
     });
     const result = await adapter.run({ task: "run the tests", cwd: "/tree", mode: "execute" });
-    expect(seen[0]?.args).toEqual(["--profile", "headless", "--json", "run the tests"]);
-    expect(seen[0]?.cwd).toBe("/tree");
+    expect(seen[1]?.args).toEqual(["--profile", "headless", "--json", "run the tests"]);
+    expect(seen[1]?.args).not.toContain("--session-id");
     expect(result.result).toBe("hello from dsh");
     expect(result.usage).toEqual({ inputTokens: 8, outputTokens: 2, totalTokens: 10 });
   });
@@ -204,6 +297,39 @@ describe("headless adapters", () => {
       "--permission-mode",
       "plan",
     ]);
+    expect(bag.calls[0]?.stdin).toBe("ignore");
+  });
+
+  it("closes stdin so codex exec does not wait, and surfaces network errors", async () => {
+    const fixture = path.join(repoRoot, "tests", "fixtures", "stdin-wait.mjs");
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "orch-codex-"));
+    const adapter = new CommandAdapter({
+      vendor: "openai",
+      harness: "codex",
+      command: process.execPath,
+      commandArgs: [fixture],
+      args: ["exec", "{prompt}"],
+      spawner: spawnProcess,
+    });
+    const result = await adapter.run({ task: "fix the bug", cwd, mode: "execute" });
+    expect(result.timedOut).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("stdin-closed");
+    expect(result.stderr).toContain("Reading additional input from stdin...");
+    expect(result.stderr).not.toContain("still waiting for stdin");
+
+    const failure = describeRunFailure({
+      exitCode: 1,
+      stdout: "",
+      stderr: [
+        "Reading additional input from stdin...",
+        "Error: stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses): connect error",
+      ].join("\n"),
+      result: "",
+    });
+    expect(failure.startsWith("network error (exit 1):")).toBe(true);
+    expect(failure).toContain("chatgpt.com");
+    expect(failure).not.toMatch(/^Reading additional input/);
   });
 
   it("does not treat a token count of 4290 as a rate limit", () => {

@@ -27,7 +27,7 @@ plan.md
 | --- | --- |
 | `src/adapters/zcode-desktop.ts` | 拉起官方桌面包里的 agent，走 `app-server --stdio` |
 | `src/adapters/zcode.ts` | 实验性自编译 CLI：`zcode -p ... --output-format --mode --cwd`，默认关闭 |
-| `src/adapters/dsh.ts` | 组装 `dsh --profile headless --json`，cwd 用子进程工作目录 |
+| `src/adapters/dsh.ts` | `dsh --profile headless`。先看 `--help`，只有帮助里出现的旗标才追加。纯文本时 stdout 是最终回答 |
 | `src/adapters/acpx.ts` | 组装 `acpx <agent> exec --format json` |
 | `src/adapters/command.ts` | 通用 argv 模板 |
 | `src/quota.ts` | 追加 `quota.jsonl`，按窗口汇总，记录冷却 |

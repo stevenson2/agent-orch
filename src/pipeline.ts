@@ -4,6 +4,7 @@ import { createAdapters } from "./adapters/factory.js";
 import type { Adapter, RunResult } from "./adapters/types.js";
 import { addWorktree, assertGitRepo, captureDiff, excludeArtifacts, porcelain } from "./git.js";
 import { appendJsonl, atomicWriteJson } from "./jsonl.js";
+import { describeRunFailure } from "./adapters/output.js";
 import { parsePlan, parseReview } from "./parse.js";
 import { executorPrompt, plannerPrompt, replanPrompt, reviewerPrompt } from "./prompts.js";
 import { QuotaStore } from "./quota.js";
@@ -165,7 +166,7 @@ export class Pipeline {
       throw new Error(`planner edited the workspace:\n${after}`);
     }
     if (outcome.kind === "failed") {
-      throw new Error(`planner failed (${outcome.result.exitCode}): ${outcome.result.stderr || outcome.result.result}`);
+      throw new Error(`planner failed (${outcome.result.exitCode}): ${describeRunFailure(outcome.result)}`);
     }
     this.run.planner = assignOf(outcome.vendor);
     await this.commit();
@@ -265,7 +266,7 @@ export class Pipeline {
       data: { vendor: executed.vendor.id, exitCode: executed.result.exitCode, round },
     });
     if (executed.kind === "failed") {
-      const note = executed.result.stderr || executed.result.result || `exit ${executed.result.exitCode}`;
+      const note = describeRunFailure(executed.result);
       return this.rejectRound(task, roundState, ["executor failed"], note);
     }
 
@@ -332,7 +333,7 @@ export class Pipeline {
     roundState.reviewer = task.reviewer;
     await this.writeRoundFile(task, round, "review.txt", reviewed.result.stdout);
     if (reviewed.kind === "failed") {
-      const note = reviewed.result.stderr || reviewed.result.result || `exit ${reviewed.result.exitCode}`;
+      const note = describeRunFailure(reviewed.result);
       return this.rejectRound(task, roundState, ["reviewer failed"], note);
     }
     let verdict;

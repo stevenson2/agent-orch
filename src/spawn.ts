@@ -8,6 +8,12 @@ export interface SpawnRequest {
   cwd: string;
   env?: Record<string, string>;
   timeoutMs?: number;
+  /**
+   * `ignore` (default) closes stdin immediately. `codex exec` reads extra
+   * input whenever stdin is still open and prints "Reading additional input
+   * from stdin...". `pipe` leaves stdin open for a caller that will write it.
+   */
+  stdin?: "ignore" | "pipe";
   /** Windows: pass args to the child exactly, without Node's extra quoting. */
   windowsVerbatimArguments?: boolean;
 }
@@ -193,10 +199,16 @@ export function spawnProcess(request: SpawnRequest): Promise<SpawnResult> {
       child = spawn(resolved.command, resolved.args, {
         cwd: request.cwd,
         env: { ...process.env, ...request.env },
-        stdio: ["ignore", "pipe", "pipe"],
+        // A pipe that is ended in this turn delivers EOF. `ignore` on Windows
+        // can still look like an open stdin to CLIs such as `codex exec`.
+        stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
         windowsVerbatimArguments: resolved.windowsVerbatimArguments ?? request.windowsVerbatimArguments,
       });
+      if (request.stdin !== "pipe") {
+        child.stdin?.on("error", () => {});
+        child.stdin?.end();
+      }
     } catch (error) {
       finish({
         exitCode: 127,
