@@ -22,6 +22,10 @@ export interface DesktopLaunch {
 
 const SCRIPT_EXT = /\.(?:mjs|cjs|js)$/i;
 
+/** Same names the desktop Host passes via createNodeProviderRuntimePathEnv. */
+export const ZCODE_BUILTIN_PROVIDER_CONFIG_FILE = "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE";
+export const ZCODE_PERSONAL_PROVIDER_CONFIG_FILE = "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE";
+
 function pathApi(platform: NodeJS.Platform): path.PlatformPath {
   return platform === "win32" ? path.win32 : path;
 }
@@ -75,8 +79,51 @@ export function desktopInstallCandidates(platform: NodeJS.Platform, home: string
 }
 
 /**
+ * Packaged layout is resources/glm/zcode.cjs beside resources/config/provider/zcode-builtin.json.
+ * The CLI's own fallback is resources/glm/provider and a five-level walk to the monorepo
+ * config/ directory. From a desktop install that walk lands on AppData/config, which is not a file.
+ */
+export function bundledBuiltinProviderConfig(bundle: string, platform: NodeJS.Platform): string {
+  const p = pathApi(platform);
+  const resourcesDir = p.dirname(p.dirname(bundle));
+  return p.join(resourcesDir, "config", "provider", "zcode-builtin.json");
+}
+
+/** Host personal config: {dataBaseDir}/.zcode/v2/provider_config.json. dataBaseDir is home, not AppData. */
+export function personalProviderConfigPath(
+  home: string,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): string {
+  const p = pathApi(platform);
+  const base = env.ZCODE_DATA_BASE_DIR?.trim() || home;
+  return p.join(base, ".zcode", "v2", "provider_config.json");
+}
+
+function hostProviderEnv(
+  bundle: string,
+  platform: NodeJS.Platform,
+  home: string,
+  env: NodeJS.ProcessEnv,
+  exists: (file: string) => boolean,
+): Record<string, string> {
+  const provider = bundledBuiltinProviderConfig(bundle, platform);
+  if (!existsFile(provider, exists)) return {};
+  const out: Record<string, string> = {};
+  if (!env[ZCODE_BUILTIN_PROVIDER_CONFIG_FILE]?.trim()) {
+    out[ZCODE_BUILTIN_PROVIDER_CONFIG_FILE] = provider;
+  }
+  if (!env[ZCODE_PERSONAL_PROVIDER_CONFIG_FILE]?.trim()) {
+    out[ZCODE_PERSONAL_PROVIDER_CONFIG_FILE] = personalProviderConfigPath(home, env, platform);
+  }
+  return out;
+}
+
+/**
  * Official desktop Host launch, from packages/services zcodeAgentProcessManager:
  * ELECTRON_RUN_AS_NODE=1 <electron> resources/glm/zcode.cjs app-server --stdio --surface desktop
+ * The Host also sets ZCODE_BUILTIN_PROVIDER_CONFIG_FILE and ZCODE_PERSONAL_PROVIDER_CONFIG_FILE
+ * so app-server does not guess the provider file from the glm bundle path.
  */
 export function resolveDesktopLaunch(input: DesktopLaunchInput): DesktopLaunch | { error: string } {
   const platform = input.platform ?? process.platform;
@@ -90,7 +137,7 @@ export function resolveDesktopLaunch(input: DesktopLaunchInput): DesktopLaunch |
     return {
       command: input.command,
       args: [...before, scriptArg, ...after, "app-server", "--stdio", "--surface", "desktop", "--cwd", input.cwd],
-      env: {},
+      env: hostProviderEnv(scriptArg, platform, home, env, exists),
     };
   }
 
@@ -105,7 +152,10 @@ export function resolveDesktopLaunch(input: DesktopLaunchInput): DesktopLaunch |
       return {
         command: process.execPath,
         args: [candidate, "app-server", "--stdio", "--surface", "desktop", "--cwd", input.cwd],
-        env: { ELECTRON_RUN_AS_NODE: "1" },
+        env: {
+          ELECTRON_RUN_AS_NODE: "1",
+          ...hostProviderEnv(candidate, platform, home, env, exists),
+        },
         bundle: candidate,
       };
     }
@@ -116,7 +166,10 @@ export function resolveDesktopLaunch(input: DesktopLaunchInput): DesktopLaunch |
     return {
       command: candidate,
       args: [bundle, "app-server", "--stdio", "--surface", "desktop", "--cwd", input.cwd],
-      env: { ELECTRON_RUN_AS_NODE: "1" },
+      env: {
+        ELECTRON_RUN_AS_NODE: "1",
+        ...hostProviderEnv(bundle, platform, home, env, exists),
+      },
       bundle,
     };
   }

@@ -32,6 +32,9 @@
 | 终态是快照 `control.phase`：`completedSuccess`、`completedInterrupted`、`error`。助手正文是 `assistantText` 行。用量在 `usage.cumulative.inputTokens` / `outputTokens` | `packages/shared/src/zcode-protocol-v4/snapshot.ts`，`rows.ts` |
 | 模型请求前，agent 向父进程发 `interaction/requestProviderRuntimeHeaders`。桌面 Host 用登录态解析出 `requestAuth.apiKey` 再回给 agent。成功体是 `{headersApplied:true, requestAuth:{apiKey}}` | `apps/zcode-cli/packages/bootstrap/src/zcode-protocol/provider-runtime-headers.ts`，`packages/services/src/zcode-agent/zcodeAgentService.ts` 的 `respondProviderRuntimeHeaders` |
 | `app-server` / `agent-server` 把请求头 `X-Title` 写成 `Z Code@electron`。普通 `zcode -p` 写成 `Z Code@cli` | `apps/zcode-cli/packages/bootstrap/src/model-config.ts` 的 `detectDefaultProviderSourceTitle` |
+| 打包后的内置供应商配置在 `resources/config/provider/zcode-builtin.json`，和 `resources/glm/` 同级。桌面 Main 用 `process.resourcesPath` 拼这条路径 | `packages/desktop/electron-builder.config.js` 的 extraResources，`packages/desktop/src/main/desktopProviderConfig.ts` |
+| Host 拉起 agent 前同时写入 `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` 和 `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE`（`{数据目录}/.zcode/v2/provider_config.json`）。两个都有时，CLI 不再按入口脚本猜路径 | `packages/provider-node/src/runtime-paths.ts` 的 `createNodeProviderRuntimePathEnv`，`packages/services/src/node.ts` 的 spawn env，`apps/zcode-cli/packages/cli/src/provider-runtime-env.ts` |
+| 不设这两个变量时，CLI 只试两个候选：入口目录下的 `provider/zcode-builtin.json`，以及从入口向上五级的 `config/provider/zcode-builtin.json`（给仓库里的 `apps/zcode-cli/.../dist` 用）。入口是 `resources/glm/zcode.cjs` 时，前者变成 `resources/glm/provider/...`，后者落到 `AppData/config/provider/...` | `apps/zcode-cli/packages/cli/src/provider-runtime-env.ts` 的 `resolveBundledZCodeBuiltinProviderConfig` |
 | CLI 和桌面共用 `~/.zcode/v2/credentials.json`（可用 `ZCODE_DATA_BASE_DIR` 改）。值是 `enc:v1:` 加 AES-256-GCM。口令优先 `ZCODE_CREDENTIAL_SECRET`，否则由平台、主目录、用户名拼出 | `apps/zcode-cli/packages/adapters/src/auth/credential-cipher.ts`，`shared-credentials.ts` |
 | 个人 Coding Plan 的 Key 键名是 `account-provider:coding-plan:<providerId>:account:<identity>:api-key`。独立 CLI 只登记个人 Coding Plan；团队套餐、Start Plan、闲时计划由桌面 Host 解析 | `apps/zcode-cli/packages/bootstrap/src/app/standalone-account-provider-runtime.ts` |
 | 权限反向请求是 `interaction/requestPermission`，应答 `{decision:"allow"|"deny"|"escalate"|"modify"}`。浏览器反向请求是 `interaction/browserList` 与 `interaction/browserExecute` | `packages/shared/src/zcode-protocol/index.ts`，`packages/shared/src/zcode-protocol-legacy-types.ts` |
@@ -47,6 +50,8 @@
 
 然后自己当协议父进程：等 `startup/storageState` 的 `ready`，发 `createSession`，订阅会话帧，把助手正文和用量收回来。`plan` / `review` 用 `mode: plan`。执行默认 `edit`，只有配置写成 `yolo` 或 `build` 才换。`interaction/browserList`、`interaction/browserExecute`，以及工具名像 browser / computer use / cua 的权限请求，一律拒绝。
 
+启动时如果安装根下有 `resources/config/provider/zcode-builtin.json`（`glm` 的同级，不是 `glm/provider`），适配器把它写进 `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE`，并把 `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` 指到 `~/.zcode/v2/provider_config.json`（或 `ZCODE_DATA_BASE_DIR` 下的同一相对路径）。这是桌面 Host 交给 agent 的那两个变量。不写的话，`app-server` 会按 `zcode.cjs` 的位置自己找，在这套安装布局里会报「无法定位 CLI ZCode Built-in Provider Config」，第二条路径是向上五级之后的 `AppData\config\provider\zcode-builtin.json`。
+
 凭据：agent 问起 `interaction/requestProviderRuntimeHeaders` 时，适配器只解密共享凭据文件里的个人 Coding Plan Key 并回 `requestAuth.apiKey`。它不实现桌面 Host 的团队套餐、Start Plan 和权益查询。找不到唯一匹配的 Key 时，这次模型请求会失败，而不是猜一个令牌。
 
 不设置 `ZCODE_APP_SERVER_AUTH_MODE`。当前主线源码里，协议进程总会向父进程要运行时头；已发布的 CLI 文档还描述过 `standalone` / `host` 两种模式。两边不一致，以你安装的那一版为准。
@@ -55,7 +60,7 @@
 
 - 用桌面里已经登录的账号跑一条小任务，看用量页是否和在 GUI 里发同一句话走同一条 1.5 倍配额。源码能确定的是：同一凭据文件、同一 `app-server` 二进制、`X-Title: Z Code@electron`、`--surface desktop`。源码里没有 1.5 这个常数，服务端按什么区分 GUI 和 CLI，这里看不到。
 - 桌面已经打开、并且占着同一个工作区的会话库时，第二个 `app-server` 可能停在 `waiting_for_lock`。编排器的任务在单独的 git worktree 里，一般是另一份库；若你把 cwd 指回桌面正在用的目录，需要看它会不会一直等锁。
-- 安装路径因平台而异。Windows 默认试 `%LOCALAPPDATA%\Programs\ZCode\ZCode.exe` 以及它旁边的 `resources\glm\zcode.cjs`。对不上时，把 `command` 写成可执行文件的绝对路径。
+- 安装路径因平台而异。Windows 默认试 `%LOCALAPPDATA%\Programs\ZCode\ZCode.exe` 以及它旁边的 `resources\glm\zcode.cjs`。对不上时，把 `command` 写成可执行文件的绝对路径。用户这台机器上，内置供应商配置在 `resources\config\provider\zcode-builtin.json`，`resources\glm\provider\` 不存在。适配器已按这个布局传环境变量；若你的包把文件放在别处，需要再对一下启动日志里还有没有「无法定位 CLI ZCode Built-in Provider Config」。
 - 权限档位是否和 GUI 里的 edit / plan 一致，以你这版 `createSession` 的行为为准。协议字段是按上面的 schema 发的。
 
 ## 自编译 ZCode CLI

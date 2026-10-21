@@ -389,6 +389,8 @@ describe("headless adapters", () => {
   it("launches the desktop bundle the way the GUI host does", () => {
     const exe = "C:\\Users\\cai\\AppData\\Local\\Programs\\ZCode\\ZCode.exe";
     const bundle = "C:\\Users\\cai\\AppData\\Local\\Programs\\ZCode\\resources\\glm\\zcode.cjs";
+    const provider =
+      "C:\\Users\\cai\\AppData\\Local\\Programs\\ZCode\\resources\\config\\provider\\zcode-builtin.json";
     const launch = resolveDesktopLaunch({
       command: "ZCode",
       commandArgs: [],
@@ -396,7 +398,7 @@ describe("headless adapters", () => {
       platform: "win32",
       home: "C:\\Users\\cai",
       env: { LOCALAPPDATA: "C:\\Users\\cai\\AppData\\Local" },
-      exists: (file) => file === exe || file === bundle,
+      exists: (file) => file === exe || file === bundle || file === provider,
     });
     expect("error" in launch).toBe(false);
     if ("error" in launch) return;
@@ -406,6 +408,12 @@ describe("headless adapters", () => {
     expect(launch.args).toContain("desktop");
     expect(launch.args.at(-1)).toBe("D:\\work");
     expect(launch.env.ELECTRON_RUN_AS_NODE).toBe("1");
+    expect(launch.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).toBe(provider);
+    expect(launch.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).not.toContain("glm\\provider");
+    expect(launch.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE).not.toContain("AppData\\config");
+    expect(launch.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE).toBe(
+      "C:\\Users\\cai\\.zcode\\v2\\provider_config.json",
+    );
   });
 
   it("unwraps an npm cmd shim and runs test scripts without sh", () => {
