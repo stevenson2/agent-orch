@@ -1,0 +1,33 @@
+{
+  "name": "agent-orch",
+  "version": "0.1.0",
+  "description": "Multi-vendor, multi-harness coding-agent orchestrator",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "orch": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "orch.example.yaml"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "orch": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "yaml": "^2.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

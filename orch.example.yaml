@@ -1,0 +1,95 @@
+# agent-orch 示例配置。数字是占位符，请按自己的订阅窗口改 quotas 和标价。
+# 复制为 orch.yaml 后再运行。空的 webhook.url 表示不推送。
+
+version: 1
+workspace: .
+artifacts_dir: .orch
+max_review_rounds: 2
+on_exhaust: human # planner：打回规划者重写这一条；human：写升级文件并停止
+
+webhook:
+  url: ""
+  timeout_ms: 5000
+
+roles:
+  planner:
+    prefer: [anthropic]
+  executor:
+    prefer: []
+  reviewer:
+    prefer: []
+
+vendors:
+  anthropic:
+    harness: claude
+    adapter: command
+    command: claude
+    args: ["-p", "{prompt}", "--output-format", "json"]
+    mode_args:
+      plan: ["--permission-mode", "plan"]
+      execute: ["--permission-mode", "acceptEdits"]
+      review: ["--permission-mode", "plan"]
+    subscription_multiplier: 1
+    list_cost_per_1k_tokens: 15
+    roles: [planner]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 500000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 2000000 }
+
+  openai:
+    harness: codex
+    adapter: command
+    command: codex
+    args: ["exec", "--json", "{prompt}"]
+    subscription_multiplier: 1
+    list_cost_per_1k_tokens: 5
+    roles: [planner, reviewer]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 800000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 4000000 }
+
+  zhipu:
+    harness: zcode
+    adapter: zcode
+    command: zcode
+    output_format: json # 也可改为 stream-json
+    zcode_execute_mode: edit # 无头执行用 edit；yolo 需要显式打开
+    subscription_multiplier: 1.5 # 仅在 ZCode 内的 1.5 倍配额，用来降低有效单价
+    list_cost_per_1k_tokens: 1
+    roles: [executor]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 2000000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 10000000 }
+
+  deepseek:
+    harness: dsh
+    adapter: dsh
+    command: dsh
+    subscription_multiplier: 1
+    list_cost_per_1k_tokens: 0.8
+    roles: [executor, reviewer]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 3000000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 15000000 }
+
+  google:
+    harness: gemini
+    adapter: acpx
+    command: acpx
+    acpx_agent: gemini
+    subscription_multiplier: 1
+    list_cost_per_1k_tokens: 2
+    roles: [reviewer]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 1000000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 5000000 }
