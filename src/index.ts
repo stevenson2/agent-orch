@@ -5,6 +5,7 @@ export { handleMcpMessage, serveMcp } from "./mcp.js";
 export { Router } from "./router.js";
 export { QuotaStore } from "./quota.js";
 export { ZCodeAdapter } from "./adapters/zcode.js";
+export { ZCodeDesktopAdapter } from "./adapters/zcode-desktop.js";
 export { DshAdapter } from "./adapters/dsh.js";
 export { AcpxAdapter } from "./adapters/acpx.js";
 export { CommandAdapter } from "./adapters/command.js";

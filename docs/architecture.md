@@ -25,7 +25,8 @@ plan.md
 
 | 路径 | 职责 |
 | --- | --- |
-| `src/adapters/zcode.ts` | 组装 `zcode -p ... --output-format --mode --cwd` |
+| `src/adapters/zcode-desktop.ts` | 拉起官方桌面包里的 agent，走 `app-server --stdio` |
+| `src/adapters/zcode.ts` | 实验性自编译 CLI：`zcode -p ... --output-format --mode --cwd`，默认关闭 |
 | `src/adapters/dsh.ts` | 组装 `dsh --profile headless --json`，cwd 用子进程工作目录 |
 | `src/adapters/acpx.ts` | 组装 `acpx <agent> exec --format json` |
 | `src/adapters/command.ts` | 通用 argv 模板 |
@@ -48,7 +49,7 @@ plan.md
 得分     = 有效单价 / max(剩余比例, 0.05)
 ```
 
-得分低的优先。智谱在 ZCode 里的 1.5 倍配额写成 `subscription_multiplier: 1.5`，同样标价会比倍率 1 的厂商更便宜。`limit_tokens` 填该 harness 里实际看到的额度，倍率不再乘一次额度。
+得分低的优先。`subscription_multiplier` 是你为这条 harness 填的实测倍率，代码不会按厂商名字猜。官方 ZCode 桌面 GUI 上用户测到 1.5；自编译 CLI 不要填 1.5。`limit_tokens` 填该 harness 里实际看到的额度，倍率不再乘一次额度。`enabled: false` 的厂商不参与排序。
 
 `roles.*.prefer` 非空时，仍有余量的偏好厂商排在前面，其他厂商留在后面做故障转移。429、`rate limit`、`quota exceeded` 会写入冷却（默认 900 秒）并换下一家。窗口用尽或正在冷却的厂商不会被选中。
 

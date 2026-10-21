@@ -53,12 +53,31 @@ vendors:
       - { name: weekly, window_seconds: 604800, limit_tokens: 4000000 }
 
   zhipu:
-    harness: zcode
+    harness: zcode-desktop
+    adapter: zcode-desktop
+    # 官方桌面安装。留 ZCode 时按安装路径找 resources/glm/zcode.cjs。
+    # 也可以写成可执行文件的绝对路径，或用 command_args 指向 zcode.cjs。
+    command: ZCode
+    zcode_execute_mode: edit # 执行用 edit；yolo 需要显式打开。规划/审查用 plan
+    # 1.5 是用户在官方桌面 GUI 里看到的配额倍率。适配器走同一套 app-server，
+    # 账单是否落在这条配额上需要本机确认，见 docs/harnesses.md。
+    subscription_multiplier: 1.5
+    list_cost_per_1k_tokens: 1
+    roles: [executor]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 2000000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 10000000 }
+
+  zcode-cli:
+    harness: zcode-cli
     adapter: zcode
     command: zcode
-    output_format: json # 也可改为 stream-json
-    zcode_execute_mode: edit # 无头执行用 edit；yolo 需要显式打开
-    subscription_multiplier: 1.5 # 仅在 ZCode 内的 1.5 倍配额，用来降低有效单价
+    enabled: false # 自行编译的 CLI，默认关闭。官方安装包没有这条命令
+    output_format: json
+    zcode_execute_mode: edit
+    subscription_multiplier: 1 # 不要填 1.5。用户测过：自编译 CLI 不走桌面 GUI 的 1.5 倍配额
     list_cost_per_1k_tokens: 1
     roles: [executor]
     cooldown_seconds: 900

@@ -22,9 +22,10 @@ export interface ZCodeAdapterOptions {
 }
 
 /**
- * Native ZCode headless prompt.
+ * Experimental self-built ZCode CLI. Official installs do not ship this binary,
+ * and a self-built `zcode -p` does not use the desktop GUI's subscription path.
  * `zcode -p <task> --output-format json|stream-json --mode plan|edit|yolo|build --cwd <dir>`
- * Execute defaults to `edit` (auto-edit). `yolo` is opt-in. Review and plan stay read-only `plan`.
+ * Execute defaults to `edit`. `yolo` is opt-in. Review and plan stay read-only `plan`.
  */
 export class ZCodeAdapter implements Adapter {
   readonly id: string;

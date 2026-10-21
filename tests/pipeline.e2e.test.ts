@@ -71,7 +71,7 @@ describe("plan execute review dry run", () => {
       expect(task?.round).toBe(2);
       expect(task?.verdict).toBe("pass");
       expect(task?.executor?.vendor).toBe("zhipu");
-      expect(task?.executor?.harness).toBe("zcode");
+      expect(task?.executor?.harness).toBe("zcode-desktop");
       expect(task?.reviewer?.vendor).toBe("deepseek");
       expect(task?.reviewer?.vendor).not.toBe(task?.executor?.vendor);
       expect(task?.reasons).toContain("acceptance met");

@@ -13,7 +13,7 @@ import type {
 } from "./types.js";
 
 const ROLES: Role[] = ["planner", "executor", "reviewer"];
-const ADAPTERS: AdapterKind[] = ["zcode", "dsh", "acpx", "command"];
+const ADAPTERS: AdapterKind[] = ["zcode", "zcode-desktop", "dsh", "acpx", "command"];
 const MODES: AgentMode[] = ["plan", "execute", "review"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -111,9 +111,15 @@ function parseVendor(id: string, value: unknown): VendorConfig {
   for (const [key, envValue] of Object.entries(envRaw)) {
     env[key] = String(envValue);
   }
+  const enabledRaw = value.enabled;
+  let enabled: boolean;
+  if (typeof enabledRaw === "boolean") enabled = enabledRaw;
+  else if (enabledRaw === undefined) enabled = adapter !== "zcode";
+  else throw new Error(`vendor ${id} enabled must be a boolean`);
   return {
     id,
     harness: asString(value.harness ?? id, `vendor ${id} harness`),
+    enabled,
     adapter,
     command: asString(value.command, `vendor ${id} command`),
     commandArgs: asStringList(value.command_args ?? value.commandArgs, `vendor ${id} command_args`),

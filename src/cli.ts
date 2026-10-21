@@ -2,14 +2,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { resolveDesktopLaunch } from "./adapters/zcode-desktop-launch.js";
 import { loadConfig } from "./config.js";
 import { serveMcp } from "./mcp.js";
 import { runPipeline } from "./pipeline.js";
 import { formatStatusText, getRun, getTask, listEvents, listRuns, summarizeRun } from "./query.js";
-
-const execFileAsync = promisify(execFile);
+import { findOnPath } from "./spawn.js";
 
 function printHelp(): void {
   process.stdout.write(`agent-orch 0.1.0
@@ -28,13 +27,8 @@ function printHelp(): void {
 `);
 }
 
-async function commandExists(command: string): Promise<boolean> {
-  try {
-    await execFileAsync("which", [command]);
-    return true;
-  } catch {
-    return false;
-  }
+function commandExists(command: string): boolean {
+  return Boolean(findOnPath(command));
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -64,7 +58,21 @@ async function main(argv: string[]): Promise<number> {
     const config = await loadConfig(configPath, parsed.values.cwd);
     process.stdout.write(`配置 ${configPath}\n工作区 ${config.workspace}\n产物 ${config.artifactsDir}\n`);
     for (const vendor of config.vendors) {
-      const found = await commandExists(vendor.command);
+      if (!vendor.enabled) {
+        process.stdout.write(
+          `关闭  ${vendor.id}  adapter=${vendor.adapter}  command=${vendor.command}  roles=${vendor.roles.join(",")}\n`,
+        );
+        continue;
+      }
+      const found =
+        vendor.adapter === "zcode-desktop"
+          ? !("error" in
+              resolveDesktopLaunch({
+                command: vendor.command,
+                commandArgs: vendor.commandArgs,
+                cwd: config.workspace,
+              }))
+          : commandExists(vendor.command);
       process.stdout.write(
         `${found ? "OK" : "缺失"}  ${vendor.id}  adapter=${vendor.adapter}  command=${vendor.command}  roles=${vendor.roles.join(",")}\n`,
       );
@@ -142,7 +150,9 @@ async function main(argv: string[]): Promise<number> {
   return 1;
 }
 
-const isDirect = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname);
+const entry = process.argv[1] ? path.resolve(process.argv[1]) : "";
+const self = path.resolve(fileURLToPath(import.meta.url));
+const isDirect = entry !== "" && entry === self;
 
 if (isDirect) {
   main(process.argv.slice(2))

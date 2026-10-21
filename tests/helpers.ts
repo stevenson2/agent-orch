@@ -7,6 +7,7 @@ import type { Config, VendorConfig } from "../src/types.js";
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const fakeAgent = path.join(repoRoot, "tests", "fixtures", "fake-agent.mjs");
+export const fakeDesktop = path.join(repoRoot, "tests", "fixtures", "zcode-desktop-fake.mjs");
 
 export async function makeTempDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -24,6 +25,7 @@ export async function initRepo(dir: string): Promise<void> {
   await git(["config", "user.email", "orch@example.com"]);
   await git(["config", "user.name", "orch"]);
   await git(["config", "commit.gpgsign", "false"]);
+  await git(["config", "core.autocrlf", "false"]);
   await fs.writeFile(path.join(dir, "README.md"), "base\n");
   await git(["add", "README.md"]);
   await git(["commit", "-m", "init"]);
@@ -37,6 +39,7 @@ export function baseVendor(overrides: Partial<VendorConfig> & Pick<VendorConfig,
     args: overrides.args ?? [],
     modeArgs: overrides.modeArgs ?? {},
     acpxAgent: overrides.acpxAgent,
+    enabled: overrides.enabled ?? true,
     outputFormat: overrides.outputFormat ?? "json",
     zcodeExecuteMode: overrides.zcodeExecuteMode ?? "edit",
     subscriptionMultiplier: overrides.subscriptionMultiplier ?? 1,
@@ -117,12 +120,12 @@ export function fakeVendors(stateFile: string, extraEnv: Record<string, string> 
     baseVendor({
       ...shared,
       id: "zhipu",
-      harness: "zcode",
-      adapter: "zcode",
-      commandArgs: [fakeAgent, "--kind", "zcode"],
+      harness: "zcode-desktop",
+      adapter: "zcode-desktop",
+      commandArgs: [fakeDesktop],
       roles: ["executor"],
-      listCostPer1kTokens: 1,
-      subscriptionMultiplier: 1.5,
+      listCostPer1kTokens: 0.5,
+      subscriptionMultiplier: 1,
       env: envFor("zhipu"),
     }),
     baseVendor({

@@ -55,7 +55,7 @@ describe("quota and routing", () => {
     expect((await store.cooling("deepseek", at)).cooling).toBe(false);
   });
 
-  it("prefers the in-harness subscription even when list price matches", async () => {
+  it("ranks a higher subscription multiplier ahead of the same list price", async () => {
     const dir = await makeTempDir("orch-route-");
     const store = new QuotaStore(dir, () => at);
     const config = baseConfig("/tmp/ws", dir, [
@@ -88,6 +88,9 @@ describe("quota and routing", () => {
 
     const reviewer = await router.select("reviewer", { excludeVendors: ["zhipu"], at });
     expect(reviewer?.vendor.id).toBe("deepseek");
+
+    config.vendors[0]!.enabled = false;
+    expect((await router.select("executor", { at }))?.vendor.id).toBe("deepseek");
     expect(reviewer?.vendor.id).not.toBe(executor?.vendor.id);
   });
 
@@ -187,7 +190,7 @@ describe("structured output parsers", () => {
             harness: "zcode",
             adapter: "zcode",
             command: "zcode",
-            subscription_multiplier: 1.5,
+            subscription_multiplier: 1,
             list_cost_per_1k_tokens: 1,
             roles: ["executor"],
             quotas: [{ name: "weekly", window_seconds: 604800, limit_tokens: 10 }],
@@ -196,10 +199,11 @@ describe("structured output parsers", () => {
       },
       "/cfg",
     );
-    expect(config.workspace).toBe("/cfg/repo");
-    expect(config.artifactsDir).toBe("/cfg/repo/.orch");
+    expect(config.workspace).toBe(path.resolve("/cfg", "repo"));
+    expect(config.artifactsDir).toBe(path.resolve(path.resolve("/cfg", "repo"), ".orch"));
     expect(config.onExhaust).toBe("planner");
-    expect(config.vendors[0]?.subscriptionMultiplier).toBe(1.5);
+    expect(config.vendors[0]?.enabled).toBe(false);
+    expect(config.vendors[0]?.subscriptionMultiplier).toBe(1);
     expect(config.webhook?.url).toBe("https://example.invalid/hook");
   });
 
@@ -209,10 +213,14 @@ describe("structured output parsers", () => {
       "anthropic",
       "openai",
       "zhipu",
+      "zcode-cli",
       "deepseek",
       "google",
     ]);
-    expect(config.vendors.find((vendor) => vendor.id === "zhipu")?.adapter).toBe("zcode");
+    expect(config.vendors.find((vendor) => vendor.id === "zhipu")?.adapter).toBe("zcode-desktop");
+    expect(config.vendors.find((vendor) => vendor.id === "zhipu")?.subscriptionMultiplier).toBe(1.5);
+    expect(config.vendors.find((vendor) => vendor.id === "zcode-cli")?.enabled).toBe(false);
+    expect(config.vendors.find((vendor) => vendor.id === "zcode-cli")?.subscriptionMultiplier).toBe(1);
     expect(config.vendors.find((vendor) => vendor.id === "deepseek")?.adapter).toBe("dsh");
     expect(config.vendors.find((vendor) => vendor.id === "google")?.acpxAgent).toBe("gemini");
     expect(config.webhook?.url).toBeUndefined();

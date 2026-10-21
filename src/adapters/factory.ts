@@ -4,6 +4,7 @@ import type { Adapter } from "./types.js";
 import { AcpxAdapter } from "./acpx.js";
 import { CommandAdapter } from "./command.js";
 import { DshAdapter } from "./dsh.js";
+import { ZCodeDesktopAdapter } from "./zcode-desktop.js";
 import { ZCodeAdapter } from "./zcode.js";
 
 export function createAdapter(vendor: VendorConfig, spawner: Spawner): Adapter {
@@ -21,6 +22,16 @@ export function createAdapter(vendor: VendorConfig, spawner: Spawner): Adapter {
       return new ZCodeAdapter({
         ...common,
         outputFormat: vendor.outputFormat,
+        executeMode: vendor.zcodeExecuteMode,
+      });
+    case "zcode-desktop":
+      return new ZCodeDesktopAdapter({
+        vendor: vendor.id,
+        harness: vendor.harness,
+        command: vendor.command,
+        commandArgs: vendor.commandArgs,
+        env: vendor.env,
+        timeoutMs: vendor.timeoutMs,
         executeMode: vendor.zcodeExecuteMode,
       });
     case "dsh":

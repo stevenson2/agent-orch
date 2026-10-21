@@ -18,10 +18,10 @@ export interface RankOptions {
  * effectiveCost = listCostPer1k / subscriptionMultiplier
  * score = effectiveCost / max(remainingRatio, 0.05)
  *
- * A 1.5x in-harness subscription therefore ranks cheaper than the same list
- * price outside that harness. A vendor with no remaining tokens in any
- * configured window is ineligible. Preferred vendors sort ahead of others;
- * the rest stay in the list so a 429 can fail over.
+ * subscriptionMultiplier is the multiplier the operator measured for that
+ * harness. A disabled vendor is skipped. A vendor with no remaining tokens
+ * in any configured window is ineligible. Preferred vendors sort ahead of
+ * others; the rest stay in the list so a 429 can fail over.
  */
 export class Router {
   constructor(
@@ -35,6 +35,7 @@ export class Router {
     const prefer = new Set(this.config.roles[role].prefer);
     const ranked: Selection[] = [];
     for (const vendor of this.config.vendors) {
+      if (!vendor.enabled) continue;
       if (!vendor.roles.includes(role)) continue;
       if (exclude.has(vendor.id)) continue;
       if ((await this.quota.cooling(vendor.id, at)).cooling) continue;

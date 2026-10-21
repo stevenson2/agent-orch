@@ -1,6 +1,6 @@
 # agent-orch
 
-多厂商、多 harness 的编码代理编排器。订阅分散在各家自己的客户端里：DeepSeek 在 `dsh` 里最好用，智谱的 1.5 倍配额只在 ZCode 里生效。这个工具把它们接成一条自动流水线。
+多厂商、多 harness 的编码代理编排器。订阅分散在各家自己的客户端里：DeepSeek 在 `dsh` 里最好用，智谱的 1.5 倍配额是在官方 ZCode 桌面里测到的。这个工具把它们接成一条自动流水线，不操作图形界面。
 
 - 强模型只做规划，输出带验收标准的 JSON 任务，不改代码。
 - 便宜模型在**该厂商自己的无头 CLI** 里执行。每个任务一个 git worktree。
@@ -83,10 +83,10 @@ roles:
 
 vendors:
   zhipu:
-    harness: zcode
-    adapter: zcode         # zcode | dsh | acpx | command
-    command: zcode
-    subscription_multiplier: 1.5
+    harness: zcode-desktop
+    adapter: zcode-desktop # zcode-desktop | zcode | dsh | acpx | command
+    command: ZCode         # 官方桌面安装；自编译 CLI 用 adapter: zcode 且 enabled: false
+    subscription_multiplier: 1.5 # 桌面 GUI 上测到的倍率，程序化路径还要本机对账单
     list_cost_per_1k_tokens: 1
     roles: [executor]
     quotas:
@@ -94,7 +94,7 @@ vendors:
       - { name: weekly, window_seconds: 604800, limit_tokens: 10000000 }
 ```
 
-`limit_tokens` 填这个 harness 里实际看到的额度。`subscription_multiplier` 只影响排序：有效单价 = 标价 / 倍率，所以智谱在 ZCode 里的 1.5 倍配额会让它比同标价的别家更优先。得分还要除以剩余比例，快用完的窗口会被让开。公式和故障转移见 [docs/architecture.md](docs/architecture.md)。
+`limit_tokens` 填这个 harness 里实际看到的额度。`subscription_multiplier` 只影响排序：有效单价 = 标价 / 倍率。倍率填你在该 harness 里测到的数。用户在官方 ZCode 桌面 GUI 里测到 1.5 倍；自编译的 `zcode -p` 不是这条配额，示例里它是关闭的，倍率 1。得分还要除以剩余比例，快用完的窗口会被让开。公式和故障转移见 [docs/architecture.md](docs/architecture.md)。
 
 示例里的 token 单价和额度都是占位数字。
 
@@ -102,7 +102,8 @@ vendors:
 
 | adapter | 命令形状 |
 | --- | --- |
-| `zcode` | `zcode -p "<任务>" --output-format json\|stream-json --mode plan\|edit\|yolo --cwd <dir>`。执行默认 `edit`，审查和规划用 `plan` |
+| `zcode-desktop` | 拉起官方桌面包里的 `zcode.cjs app-server --stdio --surface desktop`，用桌面 Host 同一条 stdio 协议建会话、发任务、等终态。不点 GUI，也不开 browser/computer use |
+| `zcode` | 实验性。自行编译的 `zcode -p "<任务>" --output-format json\|stream-json --mode plan\|edit\|yolo --cwd <dir>`。默认 `enabled: false`，倍率按 1 配。执行默认 `edit`，审查和规划用 `plan` |
 | `dsh` | `dsh --profile headless --json "<任务>"`。没有 `--cwd`，工作目录就是任务的 worktree |
 | `acpx` | `acpx <acpx_agent> exec --format json --cwd <dir>`。执行加 `--approve-all`，规划/审查加 `--approve-reads` |
 | `command` | `args` 里的 `{prompt}`、`{cwd}`、`{mode}` 换成单个参数，再附上 `mode_args`。不经过 shell |
@@ -115,7 +116,7 @@ vendors:
 2. 调用前后对比 `git status --porcelain`。规划者改了文件，整次运行记为 `error`，不会进入执行。
 3. `git worktree add -b orch/<run>/<task>`。目录在 `.orch/runs/<run>/worktrees/<task>`。原型不自动合并，worktree 留着给人对 diff。
 4. 执行者在该目录里改代码。编排器采集 diff。
-5. 有 `test_command` 时，编排器用 `sh -c` 在 worktree 里跑。失败记一轮 reject，**不调用审查者**，把测试输出交给下一轮执行者。
+5. 有 `test_command` 时，编排器在 worktree 里跑它：Unix 用 `sh -c`，Windows 用 `cmd.exe /d /s /c`。失败记一轮 reject，**不调用审查者**，把测试输出交给下一轮执行者。
 6. 测试通过后才请另一个厂商审查。`pass` 结束该任务。`reject` 把 `reasons` 和 `feedback` 带进下一轮。
 7. 达到 `max_review_rounds`：
    - `on_exhaust: planner`：规划者只重写这一条，再给同样的轮次预算。仍失败则交给人。
@@ -135,7 +136,7 @@ vendors:
 
 审查者的 vendor id 不能等于执行者。配置里没有第二家可以审查时，任务立即升级，原因 `no_cross_vendor_reviewer`，不会退回同一家自己审自己。
 
-示例配置里，执行优先选智谱（标价 1、倍率 1.5，有效单价约 0.67），审查则落到 DeepSeek 或 Gemini。若智谱返回 429，执行改走 DeepSeek，审查就改走 Gemini。
+示例配置里，执行优先选智谱桌面（标价 1、按 GUI 实测填写的倍率 1.5，有效单价约 0.67），审查则落到 DeepSeek 或 Gemini。若智谱返回 429，执行改走 DeepSeek，审查就改走 Gemini。这个 1.5 是配置里的排序参数；程序化调用是否真的记入桌面配额，见 [docs/harnesses.md](docs/harnesses.md)。
 
 ## 远程进度
 
@@ -165,8 +166,8 @@ orch mcp --config orch.yaml
 
 | 套件 | 入口 | 状态 |
 | --- | --- | --- |
-| ZCode | `zcode -p` + `--output-format json\|stream-json` + `--mode build\|plan\|edit\|yolo` + `--cwd` | 源码解读核实。2026-07 的反馈 issue 认为当时还没有用户态 `-p`；后续公开源码已经有这些开关。本机未实跑 |
-| ZCode 协议 | `zcode app-server --stdio` | 源码解读：旗标存在，发行器这么启动。适配器不用它 |
+| ZCode 桌面 | 官方安装包里的 `zcode.cjs app-server --stdio --surface desktop` | 源码核实传输和会话协议。1.5 倍配额在 GUI 上由用户测到；这条程序化路径是否同一账单，需要你本机确认 |
+| ZCode CLI | 自编译 `zcode -p` | 实验性，默认关闭，倍率 1。用户测过：不享受桌面 GUI 的 1.5 倍配额 |
 | dsh | `dsh --profile headless [--json] [--session-id] "<任务>"` | 官方文档核实。无 `--cwd`。本机未实跑 |
 | acpx | `acpx <agent> exec --format json --cwd <dir>` | 官方 README 核实 |
 | Gemini / Qwen / Kimi / Cursor / OpenCode 的 ACP | `gemini --acp`、`qwen --acp`、`kimi acp`、`cursor-agent acp`、`npx -y opencode-ai acp` | acpx 注册表核实 |
@@ -179,7 +180,7 @@ npm test
 npm run typecheck
 ```
 
-单测用注入的假进程核对 argv 和 JSON/NDJSON 解析。端到端用 `tests/fixtures/fake-agent.mjs` 扮演 zcode、dsh、acpx 和通用 CLI，跑通：
+单测用注入的假进程核对 argv、Windows 的 `.cmd` 展开，以及 ZCode 桌面 stdio 协议。端到端用 `tests/fixtures/fake-agent.mjs` 和 `zcode-desktop-fake.mjs` 扮演各家 CLI，跑通：
 
 - 规划 → 执行 → 审查拒绝 → 再执行 → 审查通过
 - 执行者 429 后换厂商，审查者仍是另一家
@@ -192,9 +193,9 @@ npm run typecheck
 
 ## 你需要在本机用真实订阅验证的事
 
-1. `orch doctor --config orch.yaml`，确认 `claude`、`codex`、`zcode`、`dsh`、`acpx` 都能被 `which` 找到，并且各自已经登录。
-2. 对每个 CLI 手动跑一次文档里的无头命令，看旗标是否和 [docs/harnesses.md](docs/harnesses.md) 一致。ZCode 的 `-p` 和 `app-server --stdio` 尤其要在你安装的版本上对一下 `--help`。
-3. 把 `orch.example.yaml` 里的额度、标价、冷却时间改成账单上的窗口。倍率 1.5 只应打在真正走 ZCode 的那条 vendor 上。
+1. `orch doctor --config orch.yaml`。Windows 上全局 npm 命令是 `.cmd`，doctor 按 PATH 查找，不依赖 `which`。确认官方 ZCode 桌面已安装并登录；自编译 `zcode` 那条应显示为关闭。
+2. 用一个已登录的小任务跑 `zcode-desktop`，对照桌面用量页，确认这次调用是否计入 GUI 那条 1.5 倍配额。细节和源码依据在 [docs/harnesses.md](docs/harnesses.md)。
+3. 把 `orch.example.yaml` 里的额度、标价、冷却时间改成账单上的窗口。1.5 只应写在你确认走桌面配额的那条 vendor 上。自编译 CLI 保持倍率 1。
 4. 用一个小仓库跑 `orch run examples/plan.md`。看 `.orch/runs/<id>/state.json` 里的执行者和审查者是不是两家，diff 和测试是否符合预期。worktree 不会自动合并。
 5. 把 `webhook.url` 指到你的云端助手，确认能收到 `task_rejected` 和 `run_finished`。也可以让那个助手连 `orch mcp`，轮询 `get_run`。
 6. 真实模型不一定遵守 JSON。若规划或审查解析失败，运行会按错误或 reject 处理；这时看 `tasks/<id>/round-*-review.txt` 和 `events.jsonl`。

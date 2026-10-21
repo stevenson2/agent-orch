@@ -1,6 +1,6 @@
 export type Role = "planner" | "executor" | "reviewer";
 export type AgentMode = "plan" | "execute" | "review";
-export type AdapterKind = "zcode" | "dsh" | "acpx" | "command";
+export type AdapterKind = "zcode" | "zcode-desktop" | "dsh" | "acpx" | "command";
 export type ExhaustPolicy = "planner" | "human";
 export type ZCodeExecuteMode = "edit" | "yolo" | "build";
 
@@ -54,6 +54,8 @@ export interface VendorConfig {
   id: string;
   harness: string;
   adapter: AdapterKind;
+  /** Self-built `zcode` is off unless the config sets enabled: true. */
+  enabled: boolean;
   command: string;
   commandArgs: string[];
   args: string[];

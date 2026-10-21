@@ -8,7 +8,7 @@ import { parsePlan, parseReview } from "./parse.js";
 import { executorPrompt, plannerPrompt, replanPrompt, reviewerPrompt } from "./prompts.js";
 import { QuotaStore } from "./quota.js";
 import { Router } from "./router.js";
-import { spawnProcess, type Spawner } from "./spawn.js";
+import { shellCommand, spawnProcess, type Spawner } from "./spawn.js";
 import { RunStore } from "./store.js";
 import {
   addUsage,
@@ -276,12 +276,7 @@ export class Pipeline {
     let testsOk = true;
     let testSummary = "no test command";
     if (testCommand) {
-      const testResult = await this.spawner({
-        command: "sh",
-        args: ["-c", testCommand],
-        cwd: task.worktree!,
-        timeoutMs: 120_000,
-      });
+      const testResult = await this.spawner(shellCommand(testCommand, task.worktree!, 120_000));
       roundState.testExitCode = testResult.timedOut ? 124 : testResult.exitCode;
       testsOk = testResult.exitCode === 0 && !testResult.timedOut;
       testSummary = [
