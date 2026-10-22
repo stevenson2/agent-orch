@@ -1,0 +1,119 @@
+# agent-orch 示例配置。数字是占位符，请按自己的订阅窗口改 quotas 和标价。
+# 复制为 orch.yaml 后再运行。空的 webhook.url 表示不推送。
+
+version: 1
+workspace: .
+artifacts_dir: .orch
+max_review_rounds: 2
+on_exhaust: human # planner：打回规划者重写这一条；human：写升级文件并停止
+
+webhook:
+  url: ""
+  timeout_ms: 5000
+
+roles:
+  planner:
+    prefer: [anthropic]
+  executor:
+    prefer: []
+  reviewer:
+    prefer: []
+
+vendors:
+  anthropic:
+    harness: claude
+    adapter: command
+    command: claude
+    args: ["-p", "{prompt}", "--output-format", "json"]
+    mode_args:
+      plan: ["--permission-mode", "plan"]
+      execute: ["--permission-mode", "acceptEdits"]
+      review: ["--permission-mode", "plan"]
+    subscription_multiplier: 1
+    list_cost_per_1k_tokens: 15
+    roles: [planner]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 500000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 2000000 }
+
+  openai:
+    harness: codex
+    adapter: command
+    command: codex
+    args: ["exec", "--json", "{prompt}"]
+    subscription_multiplier: 1
+    list_cost_per_1k_tokens: 5
+    roles: [planner, reviewer]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 800000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 4000000 }
+
+  zhipu:
+    harness: zcode-desktop
+    adapter: zcode-desktop
+    # 官方桌面安装。留 ZCode 时按安装路径找 resources/glm/zcode.cjs。
+    # 也可以写成可执行文件的绝对路径，或用 command_args 指向 zcode.cjs。
+    command: ZCode
+    zcode_execute_mode: edit # 执行用 edit；yolo 需要显式打开。规划/审查用 plan
+    # 1.5 是用户在官方桌面 GUI 里看到的配额倍率。适配器走同一套 app-server，
+    # 账单是否落在这条配额上需要本机确认，见 docs/harnesses.md。
+    subscription_multiplier: 1.5
+    list_cost_per_1k_tokens: 1
+    roles: [executor]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 2000000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 10000000 }
+
+  zcode-cli:
+    harness: zcode-cli
+    adapter: zcode
+    command: zcode
+    enabled: false # 自行编译的 CLI，默认关闭。官方安装包没有这条命令
+    output_format: json
+    zcode_execute_mode: edit
+    subscription_multiplier: 1 # 不要填 1.5。用户测过：自编译 CLI 不走桌面 GUI 的 1.5 倍配额
+    list_cost_per_1k_tokens: 1
+    roles: [executor]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 2000000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 10000000 }
+
+  deepseek:
+    harness: dsh
+    adapter: dsh
+    command: dsh
+    # Linux 从源码安装时 deepseek-harness 会打开桌面。无头改成 node，见 docs/harnesses.md：
+    # command: node
+    # command_args: ["--import", "tsx/esm", "/path/to/apps/cli/src/bin.ts"]
+    # env: { TSX_TSCONFIG_PATH: "/path/to/apps/cli/tsconfig.json", DEEPSEEK_API_KEY: "..." }
+    # args 非空时不再自动加 --profile headless。任务文本仍是最后一个参数。
+    subscription_multiplier: 1
+    list_cost_per_1k_tokens: 0.8
+    roles: [executor, reviewer]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 3000000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 15000000 }
+
+  google:
+    harness: gemini
+    adapter: acpx
+    command: acpx
+    acpx_agent: gemini
+    subscription_multiplier: 1
+    list_cost_per_1k_tokens: 2
+    roles: [reviewer]
+    cooldown_seconds: 900
+    timeout_ms: 600000
+    quotas:
+      - { name: five_hour, window_seconds: 18000, limit_tokens: 1000000 }
+      - { name: weekly, window_seconds: 604800, limit_tokens: 5000000 }

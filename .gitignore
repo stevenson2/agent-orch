@@ -1,0 +1,8 @@
+node_modules/
+dist/
+refs/
+.orch/
+coverage/
+*.log
+*.tsbuildinfo
+.DS_Store
