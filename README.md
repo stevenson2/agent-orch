@@ -104,7 +104,7 @@ vendors:
 | --- | --- |
 | `zcode-desktop` | 拉起官方桌面包里的 `zcode.cjs app-server --stdio --surface desktop`，用桌面 Host 同一条 stdio 协议建会话、发任务、等终态。不点 GUI，也不开 browser/computer use |
 | `zcode` | 实验性。自行编译的 `zcode -p "<任务>" --output-format json\|stream-json --mode plan\|edit\|yolo --cwd <dir>`。默认 `enabled: false`，倍率按 1 配。执行默认 `edit`，审查和规划用 `plan` |
-| `dsh` | `dsh --profile headless "<任务>"`。先看 `--help`，帮助里没有的旗标不加。0.1.5-rc.2 没有 `--json`。没有 `--cwd`，工作目录就是任务的 worktree |
+| `dsh` | 默认 `dsh --profile headless "<任务>"`。先看 `--help`，帮助里没有的旗标不加。0.1.5-rc.2 没有 `--json`。没有 `--cwd`，工作目录就是任务的 worktree。`command` / `command_args` / `args` 可换成从源码启动的 `node --import tsx/esm`，见 [docs/harnesses.md](docs/harnesses.md) |
 | `acpx` | `acpx <acpx_agent> exec --format json --cwd <dir>`。执行加 `--approve-all`，规划/审查加 `--approve-reads` |
 | `command` | `args` 里的 `{prompt}`、`{cwd}`、`{mode}` 换成单个参数，再附上 `mode_args`。不经过 shell |
 
@@ -168,7 +168,7 @@ orch mcp --config orch.yaml
 | --- | --- | --- |
 | ZCode 桌面 | 官方安装包里的 `zcode.cjs app-server --stdio --surface desktop` | 源码核实传输和会话协议。1.5 倍配额在 GUI 上由用户测到；这条程序化路径是否同一账单，需要你本机确认 |
 | ZCode CLI | 自编译 `zcode -p` | 实验性，默认关闭，倍率 1。用户测过：不享受桌面 GUI 的 1.5 倍配额 |
-| dsh | `dsh --profile headless "<任务>"` | 用户实测 0.1.5-rc.2：只有任务文本和 `-h`。`--json` 仅在 `--help` 列出时才加 |
+| dsh | `dsh --profile headless "<任务>"`，或自定 `command` / `command_args` / `args` | 用户实测 0.1.5-rc.2：只有任务文本和 `-h`。`--json` 仅在 `--help` 列出时才加。Linux 从源码安装时 `deepseek-harness` 打开的是桌面，无头要用 `node --import tsx/esm` |
 | acpx | `acpx <agent> exec --format json --cwd <dir>` | 官方 README 核实 |
 | Gemini / Qwen / Kimi / Cursor / OpenCode 的 ACP | `gemini --acp`、`qwen --acp`、`kimi acp`、`cursor-agent acp`、`npx -y opencode-ai acp` | acpx 注册表核实 |
 | Claude / Codex / Gemini 打印模式 | `claude -p`、`codex exec`、`gemini -p`、`opencode run` | `codex exec` 已在 Windows 上实跑：stdin 必须关掉。连不上 chatgpt.com 是本机网络，失败说明里会标出来。其余旗标以你本地的 `--help` 为准 |

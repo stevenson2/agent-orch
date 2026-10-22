@@ -16,7 +16,7 @@ export interface DesktopLaunch {
   command: string;
   args: string[];
   env: Record<string, string>;
-  /** Absolute agent bundle when one was found. Absent for an explicit script entry. */
+  /** Absolute agent bundle (resources/glm/zcode.cjs, or an explicit script entry). */
   bundle?: string;
 }
 
@@ -138,6 +138,7 @@ export function resolveDesktopLaunch(input: DesktopLaunchInput): DesktopLaunch |
       command: input.command,
       args: [...before, scriptArg, ...after, "app-server", "--stdio", "--surface", "desktop", "--cwd", input.cwd],
       env: hostProviderEnv(scriptArg, platform, home, env, exists),
+      bundle: existsFile(scriptArg, exists) ? scriptArg : undefined,
     };
   }
 

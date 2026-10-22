@@ -24,6 +24,11 @@ export interface ProtocolRunInput {
   planEnabled: boolean;
   timeoutMs: number;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Text of the agent bundle (zcode.cjs). Optional preference keys are sent
+   * only when this text contains their names. Empty means the oldest shape.
+   */
+  bundleText?: string;
 }
 
 interface RowState {
@@ -58,6 +63,7 @@ export async function runDesktopProtocol(io: ProtocolIo, input: ProtocolRunInput
   });
 
   const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  const tolerated = { bundleText: input.bundleText ?? "", omitted: new Set<string>() };
   let buffer = "";
   let failed = "";
   const storageGate: { phase: "pending" | "ready" | "failed"; error: string } = {
@@ -94,7 +100,7 @@ export async function runDesktopProtocol(io: ProtocolIo, input: ProtocolRunInput
       return;
     }
     if (typeof message.id === "string" && typeof message.method === "string") {
-      const result = answerReverse(message.method, message.params, input);
+      const result = answerReverse(message.method, message.params, input, tolerated);
       if (result.ok) writeLine(io.stdin, { id: message.id, result: result.value });
       else writeLine(io.stdin, { id: message.id, error: { code: result.code, message: result.message } });
       return;
@@ -160,22 +166,34 @@ export async function runDesktopProtocol(io: ProtocolIo, input: ProtocolRunInput
       throw new Error(`ZCode storage startup failed: ${storageGate.error}`);
     }
 
-    const commandId = randomUUID();
     const clientId = `orch-${randomUUID()}`;
-    const ack = await request("v4/command", {
-      commandId,
-      clientId,
-      sessionId: null,
-      type: "createSession",
-      payload: {
-        workspaceId: input.cwd,
-        config: { mode: input.mode, planEnabled: input.planEnabled },
-        firstInput: { text: input.task, planEnabled: input.planEnabled },
-      },
-      issuedAt: Date.now(),
-    });
-    const sessionId = readSessionId(ack);
-    if (!sessionId) throw new Error(`createSession was not accepted: ${JSON.stringify(ack).slice(0, 500)}`);
+    let sessionId: string | undefined;
+    for (let attempt = 0; attempt < 2 && !sessionId; attempt++) {
+      let ack: unknown;
+      try {
+        ack = await request("v4/command", {
+          commandId: randomUUID(),
+          clientId,
+          sessionId: null,
+          type: "createSession",
+          payload: createSessionPayload(input, tolerated.omitted),
+          issuedAt: Date.now(),
+        });
+      } catch (error) {
+        const extra = unrecognizedKeysIn(error instanceof Error ? error.message : String(error));
+        if (attempt === 1 || extra.length === 0) throw error;
+        for (const key of extra) tolerated.omitted.add(key);
+        continue;
+      }
+      sessionId = readSessionId(ack);
+      if (sessionId) break;
+      const extra = unrecognizedKeysIn(ack);
+      if (attempt === 1 || extra.length === 0) {
+        throw new Error(`createSession was not accepted: ${JSON.stringify(ack).slice(0, 500)}`);
+      }
+      for (const key of extra) tolerated.omitted.add(key);
+    }
+    if (!sessionId) throw new Error("createSession was not accepted");
 
     await request("v4/conversation/subscribe", {
       topic: `conversation/${sessionId}`,
@@ -223,6 +241,71 @@ function assistantText(view: SessionView): string {
     .map(([, row]) => row.text)
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * Required createSession fields only, plus planEnabled when this run is a plan.
+ * Older app-server builds use a strict object and reject keys they do not know.
+ */
+export function createSessionPayload(input: ProtocolRunInput, omitted: ReadonlySet<string>): Record<string, unknown> {
+  const config: Record<string, unknown> = {};
+  if (!omitted.has("mode")) config.mode = input.mode;
+  if (input.planEnabled && !omitted.has("planEnabled")) config.planEnabled = true;
+  const firstInput: Record<string, unknown> = {};
+  if (!omitted.has("text")) firstInput.text = input.task;
+  if (input.planEnabled && !omitted.has("planEnabled")) firstInput.planEnabled = true;
+  const payload: Record<string, unknown> = {};
+  if (!omitted.has("workspaceId")) payload.workspaceId = input.cwd;
+  if (!omitted.has("config") && Object.keys(config).length > 0) payload.config = config;
+  if (!omitted.has("firstInput") && Object.keys(firstInput).length > 0) payload.firstInput = firstInput;
+  return payload;
+}
+
+/**
+ * Keys the current main schema defaults, sent only when zcode.cjs still mentions them.
+ * nativeSearchEnhancementsEnabled has no default and is always sent unless a retry drops it.
+ */
+export function runtimePreferences(bundleText: string, omitted: ReadonlySet<string>): Record<string, unknown> {
+  const value: Record<string, unknown> = {
+    nativeSearchEnhancementsEnabled: false,
+    memoryEnabled: false,
+    askUserQuestionAutoResolutionEnabled: true,
+  };
+  if (bundleText.includes("toolSearchMode")) value.toolSearchMode = "off";
+  if (bundleText.includes("modelContextBudgetStrategy")) value.modelContextBudgetStrategy = "preflight-v1";
+  for (const key of omitted) delete value[key];
+  return value;
+}
+
+/** Zod strict() reports `unrecognized_keys` inside the command failure message. */
+export function unrecognizedKeysIn(value: unknown): string[] {
+  const found: string[] = [];
+  const visit = (node: unknown): void => {
+    if (typeof node === "string") {
+      const start = node.indexOf("[");
+      const end = node.lastIndexOf("]");
+      if (start < 0 || end <= start) return;
+      try {
+        visit(JSON.parse(node.slice(start, end + 1)));
+      } catch {
+        return;
+      }
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
+    if (!isRecord(node)) return;
+    if (node.code === "unrecognized_keys" && Array.isArray(node.keys)) {
+      for (const key of node.keys) {
+        if (typeof key === "string" && key) found.push(key);
+      }
+    }
+    if (typeof node.message === "string") visit(node.message);
+  };
+  visit(value);
+  return found;
 }
 
 function readSessionId(ack: unknown): string | undefined {
@@ -376,18 +459,10 @@ function answerReverse(
   method: string,
   params: unknown,
   input: ProtocolRunInput,
+  tolerated: { bundleText: string; omitted: ReadonlySet<string> },
 ): { ok: true; value: unknown } | { ok: false; code: number; message: string } {
   if (method === "session/requestRuntimePreferences") {
-    return {
-      ok: true,
-      value: {
-        nativeSearchEnhancementsEnabled: false,
-        toolSearchMode: "off",
-        memoryEnabled: false,
-        askUserQuestionAutoResolutionEnabled: true,
-        modelContextBudgetStrategy: "preflight-v1",
-      },
-    };
+    return { ok: true, value: runtimePreferences(tolerated.bundleText, tolerated.omitted) };
   }
   if (method === "interaction/requestPermission") {
     return { ok: true, value: permissionResponse(params, input.planEnabled) };

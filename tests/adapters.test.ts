@@ -10,7 +10,7 @@ import { DshAdapter, parseDshHelp } from "../src/adapters/dsh.js";
 import { describeRunFailure } from "../src/adapters/output.js";
 import { decryptCredentialValue, selectCodingPlanKey } from "../src/adapters/zcode-desktop-credentials.js";
 import { resolveDesktopLaunch } from "../src/adapters/zcode-desktop-launch.js";
-import { runDesktopProtocol } from "../src/adapters/zcode-desktop-protocol.js";
+import { runDesktopProtocol, runtimePreferences, unrecognizedKeysIn } from "../src/adapters/zcode-desktop-protocol.js";
 import { ZCodeDesktopAdapter } from "../src/adapters/zcode-desktop.js";
 import { ZCodeAdapter } from "../src/adapters/zcode.js";
 import {
@@ -169,6 +169,39 @@ describe("headless adapters", () => {
     });
     expect(seen.filter((call) => call.args.includes("--help"))).toHaveLength(1);
     expect(planned.result).toBe("created notes.txt");
+
+    const wrapped: SpawnRequest[] = [];
+    const fromSource = new DshAdapter({
+      vendor: "deepseek",
+      command: "node",
+      commandArgs: ["--import", "tsx/esm", "apps/cli/src/bin.ts"],
+      args: ["--profile", "headless"],
+      spawner: async (request) => {
+        wrapped.push(request);
+        if (request.args.includes("--help")) {
+          return { exitCode: 0, stdout: help, stderr: "", timedOut: false };
+        }
+        return { exitCode: 0, stdout: "from source\n", stderr: "", timedOut: false };
+      },
+    });
+    const sourced = await fromSource.run({ task: "task text", cwd: "/src", mode: "execute" });
+    expect(wrapped[0]?.args).toEqual([
+      "--import",
+      "tsx/esm",
+      "apps/cli/src/bin.ts",
+      "--profile",
+      "headless",
+      "--help",
+    ]);
+    expect(wrapped[1]?.args).toEqual([
+      "--import",
+      "tsx/esm",
+      "apps/cli/src/bin.ts",
+      "--profile",
+      "headless",
+      "task text",
+    ]);
+    expect(sourced.result).toBe("from source");
 
     const reviewer = new DshAdapter({
       vendor: "deepseek",
@@ -479,6 +512,15 @@ describe("headless adapters", () => {
     const created = await read();
     expect(created.method).toBe("v4/command");
     expect(created.params?.type).toBe("createSession");
+    expect(created.params).toMatchObject({
+      payload: {
+        workspaceId: "/repo",
+        config: { mode: "edit" },
+        firstInput: { text: "Create hello.txt" },
+      },
+    });
+    expect(JSON.stringify(created.params)).not.toContain("planEnabled");
+    expect(JSON.stringify(created.params)).not.toContain("toolSearchMode");
     fromAgent.write(
       `${JSON.stringify({
         id: created.id,
@@ -540,6 +582,185 @@ describe("headless adapters", () => {
     expect(result.exitCode).toBe(0);
     expect(result.result).toBe("done");
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 4, totalTokens: 7 });
+  });
+
+  it("retries createSession once when a strict older server rejects unknown keys", async () => {
+    expect(runtimePreferences("", new Set())).toEqual({
+      nativeSearchEnhancementsEnabled: false,
+      memoryEnabled: false,
+      askUserQuestionAutoResolutionEnabled: true,
+    });
+    const reported = JSON.stringify([
+      { code: "unrecognized_keys", keys: ["toolSearchMode"], path: [], message: "Unrecognized key(s) in object: 'toolSearchMode'" },
+    ]);
+    expect(
+      unrecognizedKeysIn({
+        status: "failed",
+        reasonCode: "fault.command.executionFailed",
+        message: reported,
+      }),
+    ).toEqual(["toolSearchMode"]);
+
+    const toAgent = new PassThrough();
+    const fromAgent = new PassThrough();
+    const stderr = new PassThrough();
+    const lines: string[] = [];
+    toAgent.setEncoding("utf8");
+    let pending = "";
+    toAgent.on("data", (chunk: string) => {
+      pending += chunk;
+      let nl = pending.indexOf("\n");
+      while (nl >= 0) {
+        lines.push(pending.slice(0, nl));
+        pending = pending.slice(nl + 1);
+        nl = pending.indexOf("\n");
+      }
+    });
+    const run = runDesktopProtocol(
+      { stdin: toAgent, stdout: fromAgent, stderr },
+      {
+        task: "Create hello.txt",
+        cwd: "/repo",
+        mode: "plan",
+        planEnabled: true,
+        timeoutMs: 5_000,
+        bundleText: "this build mentions toolSearchMode",
+      },
+    );
+    const read = async () => {
+      const start = Date.now();
+      while (lines.length === 0) {
+        if (Date.now() - start > 2000) throw new Error("no protocol request");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return JSON.parse(lines.shift() ?? "{}") as {
+        id?: string;
+        method?: string;
+        result?: Record<string, unknown>;
+        params?: {
+          type?: string;
+          payload?: {
+            workspaceId?: string;
+            config?: Record<string, unknown>;
+            firstInput?: Record<string, unknown>;
+          };
+        };
+      };
+    };
+    fromAgent.write(`${JSON.stringify({ method: "startup/storageState", params: { phase: "ready" } })}\n`);
+
+    const preferenceAnswers: Record<string, unknown>[] = [];
+    const payloads: Array<Record<string, unknown> | undefined> = [];
+    let accepted = false;
+    for (let attempt = 0; attempt < 3 && !accepted; attempt++) {
+      const created = await read();
+      expect(created.method).toBe("v4/command");
+      expect(created.params?.type).toBe("createSession");
+      payloads.push(created.params?.payload);
+      fromAgent.write(
+        `${JSON.stringify({
+          id: `prefs-${attempt}`,
+          method: "session/requestRuntimePreferences",
+          params: { sessionId: "pending", scope: "startup" },
+        })}\n`,
+      );
+      const answered = await read();
+      expect(answered.id).toBe(`prefs-${attempt}`);
+      preferenceAnswers.push(answered.result ?? {});
+      const unknown: string[] = [];
+      if (answered.result && "toolSearchMode" in answered.result) unknown.push("toolSearchMode");
+      const payload = created.params?.payload;
+      if (payload?.config && "planEnabled" in payload.config) unknown.push("planEnabled");
+      if (payload?.firstInput && "planEnabled" in payload.firstInput && !unknown.includes("planEnabled")) {
+        unknown.push("planEnabled");
+      }
+      if (unknown.length > 0) {
+        expect(attempt).toBe(0);
+        fromAgent.write(
+          `${JSON.stringify({
+            id: created.id,
+            result: {
+              commandId: "c",
+              status: "failed",
+              reasonCode: "fault.command.executionFailed",
+              revisionAtDecision: 1,
+              message: JSON.stringify([
+                {
+                  code: "unrecognized_keys",
+                  keys: unknown,
+                  path: [],
+                  message: `Unrecognized key(s) in object: ${unknown.map((key) => `'${key}'`).join(", ")}`,
+                },
+              ]),
+            },
+          })}\n`,
+        );
+        continue;
+      }
+      fromAgent.write(
+        `${JSON.stringify({
+          id: created.id,
+          result: {
+            commandId: "c",
+            status: "accepted",
+            revisionAtDecision: 1,
+            result: { type: "createSession", sessionId: "sess" },
+          },
+        })}\n`,
+      );
+      accepted = true;
+    }
+    expect(accepted).toBe(true);
+    expect(payloads).toHaveLength(2);
+    expect(preferenceAnswers[0]).toEqual({
+      nativeSearchEnhancementsEnabled: false,
+      toolSearchMode: "off",
+      memoryEnabled: false,
+      askUserQuestionAutoResolutionEnabled: true,
+    });
+    expect(payloads[0]).toEqual({
+      workspaceId: "/repo",
+      config: { mode: "plan", planEnabled: true },
+      firstInput: { text: "Create hello.txt", planEnabled: true },
+    });
+    expect(preferenceAnswers[1]).toEqual({
+      nativeSearchEnhancementsEnabled: false,
+      memoryEnabled: false,
+      askUserQuestionAutoResolutionEnabled: true,
+    });
+    expect(payloads[1]).toEqual({
+      workspaceId: "/repo",
+      config: { mode: "plan" },
+      firstInput: { text: "Create hello.txt" },
+    });
+
+    const subscribed = await read();
+    expect(subscribed.method).toBe("v4/conversation/subscribe");
+    fromAgent.write(
+      `${JSON.stringify({ id: subscribed.id, result: { ack: { subscriptionId: "sub", mode: "snapshot", logEpoch: "e" } } })}\n`,
+    );
+    fromAgent.write(
+      `${JSON.stringify({
+        method: "v4/conversation/frame",
+        params: {
+          wireVersion: 3,
+          kind: "complete",
+          frame: {
+            payload: {
+              kind: "snapshot",
+              snapshot: {
+                control: { phase: "completedSuccess", lastError: null },
+                rows: [{ rowId: 1, kind: "assistantText", text: "done" }],
+                usage: { cumulative: { inputTokens: 1, outputTokens: 1 } },
+              },
+            },
+          },
+        },
+      })}\n`,
+    );
+    const result = await run;
+    expect(result.exitCode).toBe(0);
+    expect(result.result).toBe("done");
   });
 
   it("runs the fake desktop agent over stdio", async () => {

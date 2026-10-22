@@ -35,7 +35,7 @@ export function createAdapter(vendor: VendorConfig, spawner: Spawner): Adapter {
         executeMode: vendor.zcodeExecuteMode,
       });
     case "dsh":
-      return new DshAdapter(common);
+      return new DshAdapter({ ...common, args: vendor.args });
     case "acpx":
       if (!vendor.acpxAgent) {
         throw new Error(`vendor ${vendor.id} uses acpx but has no acpx_agent`);

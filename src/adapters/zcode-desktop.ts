@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import fs from "node:fs/promises";
 import type { AgentMode, ZCodeExecuteMode } from "../types.js";
 import { resolveSpawnCommand } from "../spawn.js";
 import type { Adapter, RunRequest, RunResult } from "./types.js";
@@ -40,6 +41,8 @@ export class ZCodeDesktopAdapter implements Adapter {
   readonly id: string;
   readonly vendor: string;
   readonly harness: string;
+
+  private bundleText: { path: string; text: Promise<string> } | undefined;
 
   constructor(private readonly options: ZCodeDesktopAdapterOptions) {
     this.vendor = options.vendor;
@@ -91,6 +94,7 @@ export class ZCodeDesktopAdapter implements Adapter {
           planEnabled: request.mode !== "execute",
           timeoutMs,
           env: { ...process.env, ...this.options.env },
+          bundleText: await this.readBundle(launch.bundle),
         },
       );
       return result;
@@ -99,5 +103,13 @@ export class ZCodeDesktopAdapter implements Adapter {
       child.stdin?.end();
       killTree(child);
     }
+  }
+
+  private readBundle(bundle: string | undefined): Promise<string> {
+    if (!bundle) return Promise.resolve("");
+    if (this.bundleText?.path === bundle) return this.bundleText.text;
+    const text = fs.readFile(bundle, "utf8").catch(() => "");
+    this.bundleText = { path: bundle, text };
+    return text;
   }
 }

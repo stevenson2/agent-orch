@@ -10,6 +10,11 @@ export interface DshAdapterOptions {
   harness?: string;
   command: string;
   commandArgs?: string[];
+  /**
+   * Extra argv after commandArgs. When non-empty, replaces the default
+   * `--profile headless` prefix. The task text is still the last argument.
+   */
+  args?: string[];
   spawner: Spawner;
   env?: Record<string, string>;
   timeoutMs?: number;
@@ -55,13 +60,7 @@ export class DshAdapter implements Adapter {
 
   async run(request: RunRequest): Promise<RunResult> {
     const flags = await this.helpFlags(request);
-    const args = [
-      ...(this.options.commandArgs ?? []),
-      "--profile",
-      "headless",
-      ...(flags.json ? ["--json"] : []),
-      request.task,
-    ];
+    const args = [...this.prefix(), ...(flags.json ? ["--json"] : []), request.task];
     const spawned = await this.options.spawner({
       command: this.options.command,
       args,
@@ -74,12 +73,18 @@ export class DshAdapter implements Adapter {
     return plainTextResult(spawned, request.mode);
   }
 
+  /** Default published CLI is `dsh --profile headless`. A non-empty `args` list replaces that prefix. */
+  private prefix(): string[] {
+    const configured = this.options.args ?? [];
+    return [...(this.options.commandArgs ?? []), ...(configured.length > 0 ? configured : ["--profile", "headless"])];
+  }
+
   private async helpFlags(request: RunRequest): Promise<DshHelpFlags> {
     if (this.flags) return this.flags;
     const timeoutMs = request.timeoutMs ?? this.options.timeoutMs;
     const help = await this.options.spawner({
       command: this.options.command,
-      args: [...(this.options.commandArgs ?? []), "--profile", "headless", "--help"],
+      args: [...this.prefix(), "--help"],
       cwd: request.cwd,
       env: this.options.env,
       timeoutMs: Math.min(timeoutMs ?? 20_000, 20_000),

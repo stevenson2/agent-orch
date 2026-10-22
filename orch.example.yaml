@@ -90,6 +90,11 @@ vendors:
     harness: dsh
     adapter: dsh
     command: dsh
+    # Linux 从源码安装时 deepseek-harness 会打开桌面。无头改成 node，见 docs/harnesses.md：
+    # command: node
+    # command_args: ["--import", "tsx/esm", "/path/to/apps/cli/src/bin.ts"]
+    # env: { TSX_TSCONFIG_PATH: "/path/to/apps/cli/tsconfig.json", DEEPSEEK_API_KEY: "..." }
+    # args 非空时不再自动加 --profile headless。任务文本仍是最后一个参数。
     subscription_multiplier: 1
     list_cost_per_1k_tokens: 0.8
     roles: [executor, reviewer]
